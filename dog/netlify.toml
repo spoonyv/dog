@@ -1,0 +1,3 @@
+[build]
+  publish = "."             # serves static files from the root
+  functions = "functions"   # looks for serverless functions here
