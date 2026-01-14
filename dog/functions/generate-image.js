@@ -1,10 +1,20 @@
 exports.handler = async (event) => {
   try {
-    const body = event.body ? JSON.parse(event.body) : {};
-    const seed = body.seed || Math.floor(Math.random() * 4294967296);
+    // Parse request body safely
+    let seed = null;
+    if (event.body) {
+      const parsed = JSON.parse(event.body);
+      seed = parsed.seed;
+    }
+    // fallback random seed if client didn't send one
+    if (typeof seed !== 'number') {
+      seed = Math.floor(Math.random() * 4294967296);
+    }
 
     const apiKey = process.env.VENICE_API_KEY;
-    if (!apiKey) throw new Error("API key missing");
+    if (!apiKey) {
+      throw new Error("VENICE_API_KEY environment variable is missing");
+    }
 
     const response = await fetch("https://api.venice.ai/api/v1/image/generate", {
       method: "POST",
@@ -22,28 +32,44 @@ exports.handler = async (event) => {
     });
 
     if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`API error ${response.status}: ${text}`);
+      let errorBody = "";
+      try {
+        errorBody = await response.text();
+      } catch {}
+      throw new Error(`Venice API returned ${response.status}: ${errorBody || "no details"}`);
     }
 
     const data = await response.json();
 
-    let imageUrl;
-    if (data.images && data.images[0]) {
+    let imageUrl = null;
+
+    if (data.images && Array.isArray(data.images) && data.images[0]) {
       imageUrl = `data:image/png;base64,${data.images[0]}`;
-    } else {
-      throw new Error("No image returned from API");
+    } else if (data.url) {
+      imageUrl = data.url;
+    }
+
+    if (!imageUrl) {
+      console.log("API response did not contain usable image:", JSON.stringify(data));
+      throw new Error("No usable image data in API response");
     }
 
     return {
       statusCode: 200,
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageUrl })
     };
+
   } catch (err) {
-    console.error(err);
+    console.error("Function failed:", err.message);
+    console.error("Full error:", err);
+
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: err.message })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        error: err.message || "Failed to generate image"
+      })
     };
   }
 };
