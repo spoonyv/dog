@@ -1,21 +1,16 @@
 exports.handler = async (event) => {
   try {
-    // Parse the incoming request body (sent from frontend with { seed })
-    const { seed } = JSON.parse(event.body || '{}');
+    // Parse seed from frontend request (fallback if no body)
+    const body = event.body ? JSON.parse(event.body) : {};
+    const seed = body.seed || Math.floor(Math.random() * 1000000000); // Fallback random if missing
 
-    // Get API key from environment variable (set in Netlify dashboard)
     const apiKey = process.env.VENICE_API_KEY;
     if (!apiKey) {
-      throw new Error('VENICE_API_KEY environment variable is not set');
+      throw new Error('Missing VENICE_API_KEY in environment variables');
     }
 
-    // Choose your preferred Venice.ai image model
-    // Popular options (check your account / docs for availability):
-    // - venice-sd35
-    // - nano-banana-pro
-    // - flux-dev
-    // - lustify-sdxl
-    const model = "venice-sd35";  // ← change this if you prefer another model
+    // Venice model - change if you prefer another (e.g. "flux-dev", "nano-banana-pro")
+    const model = "venice-sd35";
 
     const response = await fetch('https://api.venice.ai/api/v1/image/generate', {
       method: 'POST',
@@ -25,50 +20,45 @@ exports.handler = async (event) => {
       },
       body: JSON.stringify({
         model: model,
-        prompt: 'A funny party dog in cool clothes holding a beverage, vibrant colors, party atmosphere, humorous expression, cartoonish style, high detail',
+        prompt: 'A funny party dog in cool clothes holding a beverage, vibrant colors, party atmosphere, humorous expression, cartoonish style, high detail, fun pose',
         width: 512,
         height: 512,
-        seed: seed,                  // random seed from frontend for variation
-        // Optional parameters you can tune:
-        // negative_prompt: "blurry, low quality, deformed, ugly",
-        // cfg_scale: 7.5,
-        // steps: 30,
+        seed: seed,
+        // Add these if you want more control (uncomment as needed)
+        // negative_prompt: 'blurry, lowres, bad anatomy, deformed, ugly, extra limbs',
+        // cfg_scale: 7,
+        // steps: 35,
       })
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`Venice API error: ${response.status} - ${errorText}`);
+      throw new Error(`Venice API failed: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
 
-    // Venice usually returns base64 images in data.images (array)
     let imageUrl;
-    if (data.images && data.images[0]) {
-      // Convert base64 to data URL so <img src> can use it directly
+    if (data.images && Array.isArray(data.images) && data.images[0]) {
+      // Base64 image data (common for Venice)
       imageUrl = `data:image/png;base64,${data.images[0]}`;
-    } else if (data.url) {
-      // Fallback if they return a hosted URL instead
-      imageUrl = data.url;
+    } else if (data.url || data.image_url) {
+      // Fallback for URL response
+      imageUrl = data.url || data.image_url;
     } else {
-      throw new Error('Unexpected response format from Venice API - no image found');
+      console.error('Unexpected Venice response:', data);
+      throw new Error('No image data in API response');
     }
 
-    // Return success response to frontend
     return {
       statusCode: 200,
       body: JSON.stringify({ imageUrl })
     };
-
   } catch (error) {
-    console.error('Function error:', error);
-
+    console.error('Function error:', error.message, error.stack);
     return {
       statusCode: 500,
-      body: JSON.stringify({
-        error: error.message || 'Internal server error'
-      })
+      body: JSON.stringify({ error: error.message || 'Server error generating image' })
     };
   }
 };
