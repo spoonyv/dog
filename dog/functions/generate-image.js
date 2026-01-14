@@ -1,14 +1,28 @@
+// dog/functions/generate-image.js
+// Full file — replace everything with this
+
 exports.handler = async (event) => {
   try {
-    const body = event.body ? JSON.parse(event.body) : {};
-    const seed = typeof body.seed === 'number' ? body.seed : Math.floor(Math.random() * 4294967296);
+    // Parse incoming body
+    let seed = null;
+    if (event.body) {
+      try {
+        const parsed = JSON.parse(event.body);
+        seed = parsed.seed;
+      } catch {}
+    }
+
+    // Force safe seed range (Venice max = 999999999)
+    if (typeof seed !== 'number' || isNaN(seed) || seed < 0 || seed > 999999999) {
+      seed = Math.floor(Math.random() * 1000000000); // 0 to 999999999
+    }
 
     const apiKey = process.env.VENICE_API_KEY;
     if (!apiKey) {
-      throw new Error("VENICE_API_KEY missing in env vars");
+      throw new Error("VENICE_API_KEY is not set in Netlify environment variables");
     }
 
-    const res = await fetch("https://api.venice.ai/api/v1/image/generate", {
+    const response = await fetch("https://api.venice.ai/api/v1/image/generate", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
@@ -23,37 +37,42 @@ exports.handler = async (event) => {
       })
     });
 
-    const text = await res.text();
+    const text = await response.text();
 
-    if (!res.ok) {
-      throw new Error(`Venice error ${res.status}: ${text}`);
+    if (!response.ok) {
+      throw new Error(`Venice API returned ${response.status}: ${text || "no details"}`);
     }
 
     let data;
     try {
       data = JSON.parse(text);
     } catch {
-      throw new Error(`Bad JSON from Venice: ${text}`);
+      throw new Error("Invalid response from Venice API");
     }
 
     let imageUrl = null;
-    if (data.images && data.images.length > 0) {
+    if (data.images && Array.isArray(data.images) && data.images[0]) {
       imageUrl = `data:image/png;base64,${data.images[0]}`;
+    } else if (data.url) {
+      imageUrl = data.url;
     }
 
     if (!imageUrl) {
-      throw new Error("No image in response");
+      throw new Error("No image data returned from API");
     }
 
     return {
       statusCode: 200,
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ imageUrl })
     };
+
   } catch (err) {
-    console.error("Error:", err.message);
+    console.error("Generation failed:", err.message);
     return {
       statusCode: 500,
-      body: JSON.stringify({ error: err.message })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: err.message || "Failed to generate image" })
     };
   }
 };
